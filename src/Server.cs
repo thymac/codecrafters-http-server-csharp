@@ -11,16 +11,26 @@ server.Start();
 // server.AcceptSocket(); // wait for client
 Console.WriteLine($"Started server");
 
-try {
-  // server.AcceptSocket(); // wait for client
-  var client = await server.AcceptTcpClientAsync();
-  Console.WriteLine($"Accepted TcpClient");
-  var stream = client.GetStream();
-  var message = $"HTTP/1.1 200 OK\r\n\r\n";
-  var encodedMessage = Encoding.UTF8.GetBytes(message);
-  await stream.WriteAsync(encodedMessage);
-  Console.WriteLine($"Responded message: \"{message}\"");
-} finally {
+try
+{
+  // Accept a client connection
+  TcpClient client = await server.AcceptTcpClientAsync();
+  Console.WriteLine("Accepted TcpClient");
+
+  using (NetworkStream stream = client.GetStream())
+  {
+    // Prepare the HTTP response
+    string message = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+    byte[] encodedMessage = Encoding.UTF8.GetBytes(message);
+    // Send the HTTP response to the client
+    await stream.WriteAsync(encodedMessage, 0, encodedMessage.Length);
+    Console.WriteLine($"Responded message: \"{message}\"");
+  }
+
+  client.Close();
+}
+finally
+{
   Console.WriteLine($"Stopping server");
   server.Stop();
 }
