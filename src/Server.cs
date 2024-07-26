@@ -270,6 +270,7 @@ class Program
           response = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
         }
       }
+      else if
       else
       {
         response = "HTTP/1.1 404 Not Found\r\n\r\n";
