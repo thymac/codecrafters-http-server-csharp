@@ -126,7 +126,8 @@ using System.Text;
 TcpListener server = new TcpListener(IPAddress.Any, 4221);
 server.Start();
 
-while (true) {
+while (true)
+{
   TcpClient client = server.AcceptTcpClient();
   NetworkStream stream = client.GetStream();
 
@@ -137,22 +138,47 @@ while (true) {
   string[] lines = request.Split(new string[] { "\r\n" }, StringSplitOptions.None);
   string[] startLineParts = lines[0].Split(' ');
 
-  string response;
+  string? response;
   if (startLineParts[1] == "/")
   {
     response = "HTTP/1.1 200 OK\r\n\r\n";
   }
   else if (startLineParts[1].StartsWith("/echo/"))
   {
-    string message = startLineParts[1].Substring(6);
-    response =
-        $"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {message.Length}\r\n\r\n{message}";
+    string message = startLineParts[1].Substring("/echo/".Length);
+    response = $"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {message.Length}\r\n\r\n{message}";
+  }
+  else if (startLineParts[1].StartsWith("/user-agent"))
+  {
+    Dictionary<string, string> headers = new Dictionary<string, string>();
+    for (int i = 1; i < lines[1].Length; i++)
+    {
+      if (string.IsNullOrEmpty(lines[i]))
+        break;
+
+      int colonIndex = lines[i].IndexOf(":");
+      if (colonIndex > 0)
+      {
+        string headerKey = lines[i].Substring(0, colonIndex).Trim();
+        string headerValue = lines[i].Substring(colonIndex + 1).Trim();
+        headers[headerKey] = headerValue;
+      }
+    }
+
+    if (headers.TryGetValue("User-Agent", out string? userAgent))
+    {
+      response = $"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {userAgent.Length}\r\n\r\n{userAgent}";
+    }
+    else
+    {
+      response = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
+    }
   }
   else
   {
     response = "HTTP/1.1 404 Not Found\r\n\r\n";
   }
-  
+
   byte[] responseBytes = Encoding.ASCII.GetBytes(response);
   stream.Write(responseBytes, 0, responseBytes.Length);
   client.Close();
