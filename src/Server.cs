@@ -502,101 +502,12 @@
 //   }
 // }
 
+// 
+
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
-using System.IO;
-
-Console.WriteLine("Logs from your program will appear here!");
-
-// Wait for client
-TcpListener server = new TcpListener(IPAddress.Any, 4221);
-server.Start();
-
-while (true)
-{
-  var socket = await server.AcceptSocketAsync();
-  _ = ProcessRequestAsync(socket); // Fire and forget
-}
-
-static async Task ProcessRequestAsync(Socket socket)
-{
-  var buffer = new byte[4096]; // Increased buffer size to accommodate larger requests
-  int received;
-
-  using (socket)
-  {
-    try
-    {
-      received = await socket.ReceiveAsync(buffer, SocketFlags.None);
-      var requestMessage = new HttpRequestMessage(Encoding.UTF8.GetString(buffer, 0, received));
-
-      HttpResponseMessage responseMessage;
-
-      if (requestMessage.Path == "/")
-      {
-        responseMessage = new HttpResponseMessage("200", "OK");
-      }
-      else if (requestMessage.Path.StartsWith(Routes.Echo))
-      {
-        var content = requestMessage.Path.Length == Routes.Echo.Length
-            ? null
-            : requestMessage.Path.Substring(Routes.Echo.Length + 1);
-        responseMessage = new HttpResponseMessage("200", "OK", "text/plain", content);
-      }
-      else if (requestMessage.Path.StartsWith(Routes.UserAgent))
-      {
-        responseMessage = new HttpResponseMessage("200", "OK", "text/plain", requestMessage.UserAgent);
-      }
-      else if (requestMessage.Path.StartsWith(Routes.Files) && requestMessage.Method == "POST")
-      {
-        try
-        {
-          var directory = Environment.GetCommandLineArgs()[2];
-          var fileName = requestMessage.Path.Split("/")[2];
-          var pathFile = Path.Combine(directory, fileName);
-          var body = requestMessage.Body;
-
-          await File.WriteAllTextAsync(pathFile, body);
-
-          responseMessage = new HttpResponseMessage("201", "Created");
-        }
-        catch (Exception ex)
-        {
-          Console.WriteLine($"Error creating a new file with fetched text: {ex.Message}");
-          responseMessage = new HttpResponseMessage("500", "Internal Server Error");
-        }
-      }
-      else if (requestMessage.Path.StartsWith(Routes.Files))
-      {
-        var directory = Environment.GetCommandLineArgs()[2];
-        var fileName = requestMessage.Path.Split("/")[2];
-        var pathFile = Path.Combine(directory, fileName);
-
-        if (File.Exists(pathFile))
-        {
-          var contentFile = await File.ReadAllTextAsync(pathFile);
-          responseMessage = new HttpResponseMessage("200", "OK", "application/octet-stream", contentFile);
-        }
-        else
-        {
-          responseMessage = new HttpResponseMessage("404", "Not Found");
-        }
-      }
-      else
-      {
-        responseMessage = new HttpResponseMessage("404", "Not Found");
-      }
-
-      await socket.SendAsync(responseMessage.GetBytes(), SocketFlags.None);
-    }
-    catch (Exception ex)
-    {
-      Console.WriteLine($"Error processing request: {ex.Message}");
-    }
-  }
-}
 
 public static class Routes
 {
@@ -605,12 +516,114 @@ public static class Routes
   public static string Files = "/files";
 }
 
+class Program
+{
+  public static async Task Main()
+  {
+    // You can use print statements as follows for debugging, they'll be visible
+    // when running tests.
+    Console.WriteLine("Logs from your program will appear here!");
+
+    // wait for client
+    TcpListener server = new TcpListener(IPAddress.Any, 4221);
+    server.Start();
+
+    while (true)
+    {
+      var socket = await server.AcceptSocketAsync();
+      _ = ProcessRequestAsync(socket); // Fire and forget
+    }
+  }
+
+  static async Task ProcessRequestAsync(Socket socket)
+  {
+    var buffer = new byte[1024];
+    int received;
+
+    using (socket)
+    {
+      try
+      {
+        received = await socket.ReceiveAsync(buffer, SocketFlags.None);
+        var requestMessage = new HttpRequestMessage(Encoding.UTF8.GetString(buffer, 0, received));
+
+        HttpResponseMessage responseMessage;
+
+        if (requestMessage.Path == "/")
+        {
+          responseMessage = new HttpResponseMessage("200", "OK");
+        }
+        else if (requestMessage.Path.StartsWith(Routes.Echo))
+        {
+          var content = requestMessage.Path.Length == Routes.Echo.Length
+              ? null
+              : requestMessage.Path.Substring(Routes.Echo.Length + 1);
+
+          if (requestMessage.AcceptEncoding?.Contains("gzip") == true)
+          {
+            responseMessage = new HttpResponseMessage("200", "OK", "text/plain", "gzip", content);
+          }
+          else
+          {
+            responseMessage = new HttpResponseMessage("200", "OK", "text/plain", null, content);
+          }
+        }
+        else if (requestMessage.Path.StartsWith(Routes.UserAgent))
+        {
+          responseMessage = new HttpResponseMessage("200", "OK", "text/plain", null, requestMessage.UserAgent);
+        }
+        else if (requestMessage.Path.StartsWith(Routes.Files))
+        {
+          var directory = Environment.GetCommandLineArgs()[2];
+          var fileName = requestMessage.Path.Split("/")[2];
+          var pathFile = Path.Combine(directory, fileName);
+
+          if (File.Exists(pathFile))
+          {
+            var contentFile = await File.ReadAllTextAsync(pathFile);
+            responseMessage = new HttpResponseMessage("200", "OK", "application/octet-stream", null, contentFile);
+          }
+          else if (requestMessage.Method == "POST")
+          {
+            try
+            {
+              var body = requestMessage.Body;
+              await File.WriteAllTextAsync(pathFile, body);
+              responseMessage = new HttpResponseMessage("201", "Created");
+            }
+            catch (Exception ex)
+            {
+              Console.WriteLine($"Error creating a new file with fetched text: {ex.Message}");
+              responseMessage = new HttpResponseMessage("500", "Internal Server Error");
+            }
+          }
+          else
+          {
+            responseMessage = new HttpResponseMessage("404", "Not Found");
+          }
+        }
+        else
+        {
+          responseMessage = new HttpResponseMessage("404", "Not Found");
+        }
+
+        await socket.SendAsync(responseMessage.GetBytes(), SocketFlags.None);
+      }
+      catch (Exception ex)
+      {
+        Console.WriteLine($"Error processing request: {ex.Message}");
+      }
+    }
+  }
+}
+
 class HttpRequestMessage
 {
   public string Method { get; }
   public string Path { get; }
   public string UserAgent { get; }
   public string Host { get; }
+  public string AcceptEncoding { get; }
   public string Body { get; }
 
   public HttpRequestMessage(string message)
@@ -618,10 +631,9 @@ class HttpRequestMessage
     var lines = message.Split("\r\n");
     Method = lines[0].Split(' ')[0];
     Path = lines[0].Split(' ')[1];
-    Host = lines.FirstOrDefault(line => line.StartsWith("Host:"))?.Replace("Host: ", string.Empty) ?? string.Empty;
-    UserAgent = lines.FirstOrDefault(line => line.StartsWith("User-Agent:"))?.Replace("User-Agent: ", string.Empty) ?? string.Empty;
-
-    // Extract the body from the message
+    Host = lines.FirstOrDefault(line => line.StartsWith("Host: "))?.Replace("Host: ", string.Empty) ?? string.Empty;
+    UserAgent = lines.FirstOrDefault(line => line.StartsWith("User-Agent: "))?.Replace("User-Agent: ", string.Empty) ?? string.Empty;
+    AcceptEncoding = lines.FirstOrDefault(line => line.StartsWith("Accept-Encoding: "))?.Replace("Accept-Encoding: ", string.Empty) ?? string.Empty;
     var bodyIndex = message.IndexOf("\r\n\r\n");
     Body = bodyIndex >= 0 ? message.Substring(bodyIndex + 4) : string.Empty;
   }
@@ -633,15 +645,18 @@ class HttpResponseMessage
   private readonly string _statusCode;
   private readonly string _statusDescription;
   private readonly string? _contentType;
+  private readonly string? _contentEncoding;
   private readonly string? _content;
-  private bool _hasContent => !string.IsNullOrWhiteSpace(_contentType);
-  private int _contentLength => string.IsNullOrWhiteSpace(_content) ? 0 : _content.Length;
+  private bool _hasContent => !string.IsNullOrWhiteSpace(_content);
+  private bool _hasEncoding => !string.IsNullOrWhiteSpace(_contentEncoding);
+  private int _contentLength => string.IsNullOrWhiteSpace(_content) ? 0 : Encoding.UTF8.GetByteCount(_content);
 
-  public HttpResponseMessage(string statusCode, string statusDescription, string? contentType = null, string? content = null)
+  public HttpResponseMessage(string statusCode, string statusDescription, string? contentType = null, string? contentEncoding = null, string? content = null)
   {
     _statusCode = statusCode;
     _statusDescription = statusDescription;
     _contentType = contentType;
+    _contentEncoding = contentEncoding;
     _content = content;
   }
 
@@ -649,10 +664,15 @@ class HttpResponseMessage
   {
     var stringBuilder = new StringBuilder();
     stringBuilder.Append($"{ProtocolVersion} {_statusCode} {_statusDescription}\r\n");
-    if (_hasContent)
+    if (!string.IsNullOrWhiteSpace(_contentType))
     {
       stringBuilder.Append($"Content-Type: {_contentType}\r\n");
+    }
+    if (_hasContent)
+    {
       stringBuilder.Append($"Content-Length: {_contentLength}\r\n");
+      if (_hasEncoding)
+        stringBuilder.Append($"Content-Encoding: {_contentEncoding}\r\n");
       stringBuilder.Append("\r\n");
       stringBuilder.Append(_content);
       return stringBuilder.ToString();
